@@ -1,53 +1,67 @@
 #!/usr/bin/env python3
 import os
 import re
+import json
 from pathlib import Path
 from collections import defaultdict
 
-def extract_problem_info(readme_path):
+def extract_problem_info(problem_dir):
     """
-    Extract problem number, title, and difficulty from README.md
+    Extract problem info from LeetSync metadata and README.md
     """
     try:
-        with open(readme_path, 'r') as f:
+        readme_path = os.path.join(problem_dir, 'README.md')
+        
+        if not os.path.exists(readme_path):
+            return None
+        
+        with open(readme_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
         # Extract problem number and title from h2 tag
         title_match = re.search(r'<h2>.*?<a href="[^"]+">([^<]+)</a></h2>', content)
         title = title_match.group(1) if title_match else "Unknown"
         
-        # Extract problem number from title or folder name
-        number_match = re.search(r'^(\d+)', title)
-        problem_num = number_match.group(1) if number_match else "0"
+        # Extract problem number from folder name (format: XXXX-problem-name)
+        folder_match = re.match(r'^(\d+)-', problem_dir)
+        problem_num = int(folder_match.group(1)) if folder_match else 0
         
         # Extract difficulty
         difficulty_match = re.search(r"Difficulty-([^-]+)-", content)
         difficulty = difficulty_match.group(1) if difficulty_match else "Unknown"
         
         return {
-            'number': int(problem_num),
+            'number': problem_num,
             'title': title.strip(),
-            'difficulty': difficulty.strip()
+            'difficulty': difficulty.strip(),
+            'folder': problem_dir
         }
     except Exception as e:
-        print(f"Error parsing {readme_path}: {e}")
+        print(f"Error parsing {problem_dir}: {e}")
         return None
 
 def categorize_problem(title):
     """
-    Categorize problem based on title keywords
+    Categorize problem based on title keywords.
+    Order matters - more specific categories first!
     """
     title_lower = title.lower()
     
-    # Define category keywords
+    # Check Game Theory first (most specific)
+    game_theory_keywords = ['nim', 'divisor', 'winning', 'player', 'coin', 'game']
+    if any(keyword in title_lower for keyword in game_theory_keywords):
+        # But exclude if it's a more specific category
+        if not any(kw in title_lower for kw in ['binary', 'tree', 'search']):
+            return 'Game Theory'
+    
+    # Define other categories
     categories = {
         'Array / String': ['array', 'string', 'substring', 'concatenation', 'shuffle', 'consecutive'],
         'Linked List': ['linked', 'list', 'node'],
         'Tree': ['tree', 'binary', 'traversal', 'inorder'],
         'Backtracking / Recursion': ['permutation', 'combination', 'generate', 'queens', 'parenthes'],
-        'Dynamic Programming': ['game', 'nim', 'divisor', 'dp'],
-        'Game Theory': ['game', 'winning', 'player', 'optimal'],
-        'Graph': ['graph', 'path'],
+        'Dynamic Programming': ['dp', 'dynamic'],
+        'Graph': ['graph', 'path', 'search'],
         'Hash Table': ['hash', 'map', 'duplicate'],
         'Stack / Queue': ['stack', 'queue'],
         'Math': ['math', 'number', 'sum']
@@ -66,20 +80,15 @@ def generate_readme():
     problems = defaultdict(lambda: defaultdict(list))
     
     # Find all problem folders (format: number-problem-name)
-    problem_dirs = [d for d in os.listdir('.') if os.path.isdir(d) and re.match(r'^\d+-', d)]
+    problem_dirs = sorted([d for d in os.listdir('.') 
+                          if os.path.isdir(d) and re.match(r'^\d+-', d)])
     
     for problem_dir in problem_dirs:
-        readme_path = os.path.join(problem_dir, 'README.md')
-        if os.path.exists(readme_path):
-            info = extract_problem_info(readme_path)
-            if info:
-                category = categorize_problem(info['title'])
-                difficulty = info['difficulty']
-                problems[category][difficulty].append({
-                    'number': info['number'],
-                    'title': info['title'],
-                    'folder': problem_dir
-                })
+        info = extract_problem_info(problem_dir)
+        if info:
+            category = categorize_problem(info['title'])
+            difficulty = info['difficulty']
+            problems[category][difficulty].append(info)
     
     # Generate README.md content
     readme_content = """# LeetCode Solutions
@@ -117,10 +126,13 @@ This repository contains organized LeetCode problem solutions categorized by sub
         
         for difficulty in difficulty_order:
             if difficulty in problems[category]:
+                # Sort by problem number
                 probs = sorted(problems[category][difficulty], key=lambda x: x['number'])
                 readme_content += f"#### {difficulty}\n"
-                for prob in probs:
-                    readme_content += f"- **{prob['number']}** - [{prob['title']}](./{prob['folder']}/) \n"
+                
+                # Add sequential numbering within each difficulty
+                for idx, prob in enumerate(probs, 1):
+                    readme_content += f"- {idx} - [{prob['title']}](./{prob['folder']}/) \n"
                 readme_content += "\n"
         
         readme_content += "---\n"
@@ -156,12 +168,12 @@ This repository contains organized LeetCode problem solutions categorized by sub
 
 ---
 
-*This repository is managed by [LeetPush extension](https://github.com/LeetPushExtension/LeetPush)*
+*This repository is managed by [LeetSync extension](https://github.com/LeetPushExtension/LeetPush)*
 *README automatically generated by GitHub Actions*
 """
     
     # Write README
-    with open('README.md', 'w') as f:
+    with open('README.md', 'w', encoding='utf-8') as f:
         f.write(readme_content)
     
     print("README.md generated successfully!")
